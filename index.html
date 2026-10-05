@@ -159,7 +159,7 @@
             <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.75rem;">
               Dán đoạn mã SDP (Offer/Answer) vào ô bên dưới để soi trực quan các thông số tầng Transport & Application:
             </p>
-            <textarea id="sdpInspectorInput" rows="4" placeholder="Dán chuỗi Signal SDP tại đây để phân tích..." oninput="parseSDP()"></textarea>
+            <textarea id="sdpInspectorInput" rows="4" placeholder="Dán chuỗi Signal SDP tại đây để phân tích..." oninput="parseSDP()" aria-label="Input SDP để phân tích"></textarea>
             
             <div id="sdpParsedResult" style="margin-top: 1rem;">
               <div class="sdp-item">
@@ -212,8 +212,8 @@
           </div>
 
           <div style="margin-bottom: 1rem;">
-            <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">Mã Signal Của Bạn (Gửi cho đối phương):</label>
-            <textarea id="localSignal" rows="4" readonly placeholder="Bấm nút 'Tạo OFFER' bên dưới để sinh mã..."></textarea>
+            <label for="localSignal" style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">Mã Signal Của Bạn (Gửi cho đối phương):</label>
+            <textarea id="localSignal" rows="4" readonly placeholder="Bấm nút 'Tạo OFFER' bên dưới để sinh mã..." aria-label="Mã Signal của bạn"></textarea>
             <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
               <button class="btn btn-block" onclick="createOffer()">1. Tạo OFFER Signal</button>
               <button class="btn btn-secondary" onclick="copyLocalSignal()">Copy Signal</button>
@@ -221,8 +221,8 @@
           </div>
 
           <div>
-            <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">Nhập Signal Từ Đối Phương:</label>
-            <textarea id="remoteSignal" rows="4" placeholder="Dán mã OFFER hoặc ANSWER từ máy đối phương vào đây..."></textarea>
+            <label for="remoteSignal" style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">Nhập Signal Từ Đối Phương:</label>
+            <textarea id="remoteSignal" rows="4" placeholder="Dán mã OFFER hoặc ANSWER từ máy đối phương vào đây..." aria-label="Signal từ đối phương"></textarea>
             <button class="btn btn-success btn-block" style="margin-top: 0.5rem;" onclick="processRemoteSignal()">2. Chấp Nhận & Kết Nối (Accept Signal)</button>
           </div>
         </div>
@@ -256,14 +256,14 @@
             </div>
           </div>
 
-          <div class="chat-box" id="chatBox">
+          <div class="chat-box" id="chatBox" aria-live="polite" aria-label="Khung chat P2P">
             <div style="text-align: center; font-size: 0.75rem; color: var(--text-muted); margin: auto;">
               Chờ kết nối P2P hoàn tất để bắt đầu gửi tin nhắn...
             </div>
           </div>
 
           <div style="display: flex; gap: 0.5rem; margin-bottom: 0.75rem;">
-            <input type="text" id="msgInput" placeholder="Nhập tin nhắn..." onkeydown="if(event.key==='Enter') sendChatMessage()">
+            <input type="text" id="msgInput" placeholder="Nhập tin nhắn..." maxlength="2000" aria-label="Nhập tin nhắn" onkeydown="if(event.key==='Enter') sendChatMessage()">
             <button class="btn" onclick="sendChatMessage()">Gửi</button>
           </div>
 
@@ -278,7 +278,7 @@
           <span>Nhật Ký Sự Kiện Hệ Thống & WebRTC Stats Log</span>
           <button class="btn btn-secondary" style="font-size: 0.7rem; padding: 0.2rem 0.5rem;" onclick="clearLogs()">Xóa Log</button>
         </div>
-        <div class="log-box" id="sysLogs"></div>
+        <div class="log-box" id="sysLogs" aria-live="polite" aria-label="Nhật ký hệ thống"></div>
       </div>
     </div>
 
@@ -346,7 +346,15 @@
     let selectedProtocol = 'TCP';
     let sentCount = 0;
     let recvCount = 0;
-    let isInitiator = false;
+    let rttTimer = null;
+    const MAX_LOGS = 200;
+    const ICE_CONFIG = {
+      iceServers: [
+        { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }
+        // Thêm TURN khi deploy thực tế, ví dụ:
+        // { urls: 'turn:your-turn-host:3478', username: 'user', credential: 'pass' }
+      ]
+    };
 
     // --- TAB NAVIGATION ---
     function switchTab(tabId, evt) {
@@ -370,31 +378,64 @@
       if (type === 'warn') color = '#f59e0b';
       if (type === 'success') color = '#22c55e';
 
-      line.innerHTML = `<span style="color: #64748b;">[${time}]</span> <span style="color: ${color}">${msg}</span>`;
+      const timeSpan = document.createElement('span');
+      timeSpan.style.color = '#64748b';
+      timeSpan.textContent = `[${time}] `;
+      const msgSpan = document.createElement('span');
+      msgSpan.style.color = color;
+      msgSpan.textContent = String(msg);
+      line.appendChild(timeSpan);
+      line.appendChild(msgSpan);
       logs.appendChild(line);
+      while (logs.children.length > MAX_LOGS) logs.removeChild(logs.firstChild);
       logs.scrollTop = logs.scrollHeight;
     }
 
     function clearLogs() {
       const logs = document.getElementById('sysLogs');
-      if (logs) logs.innerHTML = '';
+      if (logs) logs.replaceChildren();
     }
 
     // --- WEBRTC SETUP ---
+    function closePeerConnection() {
+      try { if (rttTimer) clearInterval(rttTimer); } catch (e) {}
+      rttTimer = null;
+      try { if (tcpChannel) tcpChannel.close(); } catch (e) {}
+      try { if (udpChannel) udpChannel.close(); } catch (e) {}
+      tcpChannel = null;
+      udpChannel = null;
+      try { if (pc) pc.close(); } catch (e) {}
+      pc = null;
+    }
+
     function initPeerConnection() {
-      const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-      pc = new RTCPeerConnection(config);
+      closePeerConnection();
+      pc = new RTCPeerConnection(ICE_CONFIG);
 
       pc.onicecandidate = (e) => {
         if (e.candidate) {
-          log(`[ICE Candidate] Tìm thấy Candidate IP: ${e.candidate.candidate.split(' ')[4] || 'LAN'}`);
+          const parts = String(e.candidate.candidate || '').split(' ');
+          log(`[ICE Candidate] Tìm thấy Candidate IP: ${parts[4] || 'LAN'}`);
         } else {
           log('[ICE Gathering] Đã thu thập xong toàn bộ ICE Candidates!', 'success');
-          document.getElementById('localSignal').value = JSON.stringify(pc.localDescription);
+          try {
+            document.getElementById('localSignal').value = JSON.stringify(pc.localDescription);
+          } catch (err) {
+            log(`[Lỗi Signal] Không serialize được localDescription: ${err.message}`, 'err');
+          }
+        }
+      };
+
+      pc.onicegatheringstatechange = () => {
+        if (!pc) return;
+        log(`[ICE Gathering State] ${pc.iceGatheringState}`);
+        if (pc.iceGatheringState === 'gathering') {
+          document.getElementById('localSignal').placeholder = 'Đang thu thập ICE Candidates, chờ 2-3 giây...';
         }
       };
 
       pc.onconnectionstatechange = () => {
+        if (!pc) return;
         log(`[Connection State] Trạng thái kết nối: ${pc.connectionState}`);
         const statusBadge = document.getElementById('connStatus');
         if (pc.connectionState === 'connected') {
@@ -404,6 +445,9 @@
         } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
           statusBadge.textContent = 'Mất kết nối';
           statusBadge.className = 'badge badge-amber';
+          stopRTTMeasurement();
+        } else if (pc.connectionState === 'closed') {
+          stopRTTMeasurement();
         }
       };
 
@@ -422,47 +466,71 @@
       };
 
       channel.onmessage = (e) => {
-        recvCount++;
-        document.getElementById('metricRecv').textContent = recvCount;
-        const data = JSON.parse(e.data);
-        
+        let data;
+        try {
+          data = JSON.parse(e.data);
+        } catch (err) {
+          log(`[DataChannel] Gói tin không phải JSON, bỏ qua: ${err.message}`, 'err');
+          return;
+        }
+        if (!data || typeof data !== 'object') return;
+
         if (data.type === 'ping') {
-          channel.send(JSON.stringify({ type: 'pong', timestamp: data.timestamp }));
+          try { channel.send(JSON.stringify({ type: 'pong', timestamp: data.timestamp })); } catch (err) {}
           return;
         }
         if (data.type === 'pong') {
-          const rtt = Date.now() - data.timestamp;
+          const rtt = Date.now() - Number(data.timestamp || Date.now());
           document.getElementById('metricRTT').textContent = `${rtt} ms`;
           return;
         }
+        if (data.type !== 'chat') return;
 
-        renderChatMessage(data.sender || 'Đối phương', data.text, data.proto, 'received', data.time);
+        recvCount++;
+        document.getElementById('metricRecv').textContent = recvCount;
+        renderChatMessage(data.sender || 'Đối phương', data.text || '', data.proto || '?', 'received', data.time || '');
       };
     }
 
     async function createOffer() {
-      initPeerConnection();
-      isInitiator = true;
+      try {
+        initPeerConnection();
 
-      // Create TCP-like DataChannel (Reliable & Ordered)
-      tcpChannel = pc.createDataChannel('tcp-channel', { ordered: true });
-      setupDataChannelEvents(tcpChannel);
+        // Create TCP-like DataChannel (Reliable & Ordered)
+        tcpChannel = pc.createDataChannel('tcp-channel', { ordered: true });
+        setupDataChannelEvents(tcpChannel);
 
-      // Create UDP-like DataChannel (Unreliable & Unordered)
-      udpChannel = pc.createDataChannel('udp-channel', { ordered: false, maxRetransmits: 0 });
-      setupDataChannelEvents(udpChannel);
+        // Create UDP-like DataChannel (Unreliable & Unordered)
+        udpChannel = pc.createDataChannel('udp-channel', { ordered: false, maxRetransmits: 0 });
+        setupDataChannelEvents(udpChannel);
 
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      log('[Handshake] Đã khởi tạo OFFER SDP. Đang chờ thu thập ICE Candidates...');
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        document.getElementById('localSignal').value = '';
+        document.getElementById('localSignal').placeholder = 'Đang thu thập ICE Candidates, chờ 2-3 giây rồi copy...';
+        log('[Handshake] Đã khởi tạo OFFER SDP. Đang chờ thu thập ICE Candidates...');
+      } catch (err) {
+        log(`[Lỗi Offer] Không tạo được OFFER: ${err.message}`, 'err');
+      }
     }
 
     async function processRemoteSignal() {
       const remoteText = document.getElementById('remoteSignal').value.trim();
       if (!remoteText) return alert('Vui lòng dán mã Signal từ đối phương!');
 
+      let signal;
       try {
-        const signal = JSON.parse(remoteText);
+        signal = JSON.parse(remoteText);
+      } catch (err) {
+        log(`[Lỗi Signal] Không phải JSON hợp lệ: ${err.message}`, 'err');
+        return;
+      }
+      if (!signal || (signal.type !== 'offer' && signal.type !== 'answer') || typeof signal.sdp !== 'string') {
+        log('[Lỗi Signal] Thiếu trường type (offer/answer) hoặc sdp.', 'err');
+        return;
+      }
+
+      try {
         if (!pc) initPeerConnection();
 
         await pc.setRemoteDescription(new RTCSessionDescription(signal));
@@ -472,18 +540,32 @@
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           log('[Handshake] Đã sinh ANSWER SDP. Hãy copy ô Signal truyền lại cho Peer A!');
+        } else {
+          log('[Handshake] Đã áp ANSWER, chờ kết nối P2P...', 'success');
         }
       } catch (err) {
         log(`[Lỗi Signal] Mã SDP không hợp lệ: ${err.message}`, 'err');
       }
     }
 
-    function copyLocalSignal() {
+    async function copyLocalSignal() {
       const text = document.getElementById('localSignal');
-      if (!text.value) return alert('Chưa có mã Signal để copy!');
-      text.select();
-      document.execCommand('copy');
-      alert('Đã copy mã Signal vào Clipboard!');
+      if (!text.value) {
+        alert('Chưa có mã Signal để copy! Hãy chờ thu thập ICE xong (2-3 giây).');
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(text.value);
+        alert('Đã copy mã Signal vào Clipboard!');
+      } catch (err) {
+        try {
+          text.select();
+          const ok = document.execCommand('copy');
+          alert(ok ? 'Đã copy mã Signal vào Clipboard!' : 'Copy thất bại, hãy Ctrl+C thủ công!');
+        } catch (e2) {
+          alert('Copy thất bại, hãy Ctrl+C thủ công!');
+        }
+      }
     }
 
     // --- PROTOCOL SWITCHING & DATA TRANSFER ---
@@ -499,6 +581,7 @@
       const input = document.getElementById('msgInput');
       const text = input.value.trim();
       if (!text) return;
+      if (text.length > 2000) return alert('Tin nhắn tối đa 2000 ký tự!');
 
       const activeChannel = selectedProtocol === 'TCP' ? tcpChannel : udpChannel;
       if (!activeChannel || activeChannel.readyState !== 'open') {
@@ -507,7 +590,11 @@
 
       const time = new Date().toLocaleTimeString();
       const payload = { type: 'chat', text, proto: selectedProtocol, time, sender: 'Bạn' };
-      activeChannel.send(JSON.stringify(payload));
+      try {
+        activeChannel.send(JSON.stringify(payload));
+      } catch (err) {
+        return alert(`Gửi thất bại: ${err.message}`);
+      }
 
       sentCount++;
       document.getElementById('metricSent').textContent = sentCount;
@@ -517,14 +604,27 @@
 
     function renderChatMessage(sender, text, proto, type, time) {
       const chatBox = document.getElementById('chatBox');
+      const placeholder = chatBox.querySelector('div[style*="text-align: center"]');
+      if (placeholder) placeholder.remove();
       const msgEl = document.createElement('div');
-      msgEl.className = `chat-msg ${type}`;
-      msgEl.innerHTML = `
-        <span class="proto-tag">[${proto}] ${sender}</span>
-        <div>${text}</div>
-        <div class="time-tag">${time}</div>
-      `;
+      msgEl.className = `chat-msg ${type === 'sent' ? 'sent' : 'received'}`;
+
+      const tag = document.createElement('span');
+      tag.className = 'proto-tag';
+      tag.textContent = `[${String(proto).slice(0, 10)}] ${String(sender).slice(0, 50)}`;
+
+      const body = document.createElement('div');
+      body.textContent = String(text).slice(0, 2000);
+
+      const timeEl = document.createElement('div');
+      timeEl.className = 'time-tag';
+      timeEl.textContent = String(time).slice(0, 50);
+
+      msgEl.appendChild(tag);
+      msgEl.appendChild(body);
+      msgEl.appendChild(timeEl);
       chatBox.appendChild(msgEl);
+      while (chatBox.children.length > 200) chatBox.removeChild(chatBox.firstChild);
       chatBox.scrollTop = chatBox.scrollHeight;
     }
 
@@ -537,9 +637,15 @@
       log(`[Burst Stream] Đang phát chuỗi 10 gói tin liên tiếp qua ${selectedProtocol}...`, 'warn');
       for (let i = 1; i <= 10; i++) {
         setTimeout(() => {
+          if (!activeChannel || activeChannel.readyState !== 'open') return;
           const time = new Date().toLocaleTimeString();
           const payload = { type: 'chat', text: `Gói tin Packet #${i} (Burst)`, proto: selectedProtocol, time, sender: 'Bạn' };
-          activeChannel.send(JSON.stringify(payload));
+          try {
+            activeChannel.send(JSON.stringify(payload));
+          } catch (err) {
+            log(`[Burst Stream] Gói #${i} gửi thất bại: ${err.message}`, 'err');
+            return;
+          }
           sentCount++;
           document.getElementById('metricSent').textContent = sentCount;
           renderChatMessage('Bạn', `Gói tin Packet #${i} (Burst)`, selectedProtocol, 'sent', time);
@@ -548,50 +654,92 @@
     }
 
     function startRTTMeasurement() {
-      setInterval(() => {
+      stopRTTMeasurement();
+      rttTimer = setInterval(() => {
         const activeChannel = selectedProtocol === 'TCP' ? tcpChannel : udpChannel;
         if (activeChannel && activeChannel.readyState === 'open') {
-          activeChannel.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
+          try {
+            activeChannel.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
+          } catch (err) {}
         }
       }, 2000);
     }
+
+    function stopRTTMeasurement() {
+      try { if (rttTimer) clearInterval(rttTimer); } catch (e) {}
+      rttTimer = null;
+    }
+
+    window.addEventListener('beforeunload', () => {
+      stopRTTMeasurement();
+      try { if (pc) pc.close(); } catch (e) {}
+    });
 
     // --- SDP PARSER FOR TAB 1 ---
     function parseSDP() {
       const raw = document.getElementById('sdpInspectorInput').value.trim();
       const container = document.getElementById('sdpParsedResult');
-      container.innerHTML = '';
+      container.replaceChildren();
 
       if (!raw) {
-        container.innerHTML = '<div class="sdp-item"><div class="sdp-key">Chưa có dữ liệu</div><div class="sdp-desc">Hãy dán mã SDP vào ô trên.</div></div>';
+        const empty = document.createElement('div');
+        empty.className = 'sdp-item';
+        const k = document.createElement('div');
+        k.className = 'sdp-key';
+        k.textContent = 'Chưa có dữ liệu';
+        const d = document.createElement('div');
+        d.className = 'sdp-desc';
+        d.textContent = 'Hãy dán mã SDP vào ô trên.';
+        empty.appendChild(k);
+        empty.appendChild(d);
+        container.appendChild(empty);
         return;
       }
 
       let sdpText = raw;
       try {
         const obj = JSON.parse(raw);
-        if (obj.sdp) sdpText = obj.sdp;
+        if (obj && typeof obj.sdp === 'string') sdpText = obj.sdp;
       } catch (e) {}
 
       const lines = sdpText.split('\n');
+      const descs = {
+        'v=': 'SDP Protocol Version (Phiên bản giao thức SDP)',
+        'o=': 'Origin / Session Identifier (ID phiên làm việc & thông tin Originator)',
+        's=': 'Session Name (Tên phiên làm việc)',
+        't=': 'Timing (Thời gian hiệu lực phiên)',
+        'c=': 'Connection Data (Thông tin địa chỉ IP kết nối)',
+        'm=': 'Media / Application Description (Khai báo cổng Port & Giao thức tầng Transport - SCTP/UDP)',
+        'a=fingerprint': 'DTLS Fingerprint (Xác thực mã hóa đầu cuối)',
+        'a=setup': 'DTLS Setup Role (Vai trò client/server khi bắt tay mã hóa)',
+        'a=mid': 'Media ID (Định danh luồng media/data)',
+        'a=ice-ufrag': 'ICE Username Fragment (Định danh ICE)',
+        'a=ice-pwd': 'ICE Password (Mật khẩu ICE)',
+        'a=candidate': 'ICE Candidate: Địa chỉ IP LAN/Public & Port thực tế thu thập được',
+        'a=sctp-port': 'SCTP Port: Cổng truyền dữ liệu P2P DataChannel',
+        'a=max-message-size': 'Max Message Size (Kích thước gói tối đa SCTP)'
+      };
       lines.forEach(line => {
         line = line.trim();
         if (!line) return;
 
-        let key = line.substring(0, 2);
-        let val = line.substring(2);
         let desc = 'Thông số cấu hình WebRTC';
-
-        if (key === 'v=') desc = 'SDP Protocol Version (Phiên bản giao thức SDP)';
-        else if (key === 'o=') desc = 'Origin / Session Identifier (ID phiên làm việc & thông tin Originator)';
-        else if (key === 'c=') desc = 'Connection Data (Thông tin địa chỉ IP kết nối)';
-        else if (key === 'm=') desc = 'Media / Application Description (Khai báo cổng Port & Giao thức tầng Transport - SCTP/UDP)';
-        else if (line.startsWith('a=candidate')) desc = 'ICE Candidate: Địa chỉ IP LAN/Public & Port thực tế thu thập được';
-        else if (line.startsWith('a=sctp-port')) desc = 'SCTP Port: Cổng truyền dữ liệu P2P DataChannel';
+        for (const prefix of Object.keys(descs)) {
+          if (prefix === 'v=' || prefix === 'o=' || prefix === 's=' || prefix === 't=' || prefix === 'c=' || prefix === 'm=') {
+            if (line.startsWith(prefix)) { desc = descs[prefix]; break; }
+          } else if (line.startsWith(prefix)) { desc = descs[prefix]; break; }
+        }
 
         const item = document.createElement('div');
         item.className = 'sdp-item';
-        item.innerHTML = `<div class="sdp-key">${line.substring(0, 30)}${line.length > 30 ? '...' : ''}</div><div class="sdp-desc">↳ ${desc}</div>`;
+        const keyEl = document.createElement('div');
+        keyEl.className = 'sdp-key';
+        keyEl.textContent = line.length > 80 ? line.substring(0, 80) + '...' : line;
+        const descEl = document.createElement('div');
+        descEl.className = 'sdp-desc';
+        descEl.textContent = `↳ ${desc}`;
+        item.appendChild(keyEl);
+        item.appendChild(descEl);
         container.appendChild(item);
       });
     }

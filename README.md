@@ -4,10 +4,11 @@ Lab thực hành WebRTC & Network Protocol: Client/Server SDP Architecture, P2P 
 
 ## Nội dung
 
-- `AnhTu.html` — Trang lab duy nhất, gồm 3 tab:
+- `index.html` — Trang lab chính (bản đã fix XSS/leak), đây là trang GitHub Pages serve:
   1. Kiến trúc & phân tách SDP
   2. Phòng thực hành P2P Chat (TCP-like / UDP-like, Burst Stream, RTT)
   3. Cơ chế Signaling tự động trong thực tế
+- `AnhTu.html` — Redirect nhẹ sang `index.html`, giữ lại để link cũ không gãy.
 
 ## Chạy local
 
